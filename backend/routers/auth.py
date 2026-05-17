@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from db.session import get_db
-from models.user import User
+from models.user import User, Profile
 from utils.auth import hash_password, verify_password, create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -45,6 +45,16 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
         hashed_password=hash_password(payload.password),
     )
     db.add(user)
+    db.flush()  # WHY flush and not commit?
+                # flush sends SQL to DB but doesn't finalize yet
+                # so we get user.id to use in Profile, but can still rollback if Profile fails
+                # both user + profile are committed together — all or nothing (atomic)
+
+    profile = Profile(
+        user_id=user.id,
+        display_name=payload.username,  # default display name = username
+    )
+    db.add(profile)
     db.commit()
     db.refresh(user)
 
