@@ -1,14 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
+from uuid import UUID
 from db.session import get_db
 from models.user import User, Profile
+from models.link import Link
 from utils.auth import get_current_user
 
 router = APIRouter(tags=["profile"])
 
 # --- Schemas ---
+
+class LinkPublic(BaseModel):
+    id:    UUID
+    title: str
+    url:   str
+    order: int
+    model_config = {"from_attributes": True}
 
 class ProfileUpdate(BaseModel):
     display_name: Optional[str] = None
@@ -26,6 +35,15 @@ class ProfileResponse(BaseModel):
     # WHY Config + from_attributes?
     # Pydantic v2 needs this to read data from SQLAlchemy objects (ORM models)
     # Without it, Pydantic doesn't know how to read object.attribute style data
+    model_config = {"from_attributes": True}
+
+class PublicProfileResponse(BaseModel):
+    username:     str
+    display_name: Optional[str]
+    bio:          Optional[str]
+    avatar_url:   Optional[str]
+    theme:        str
+    links:        List[LinkPublic] = []  # public page shows active links too
     model_config = {"from_attributes": True}
 
 
@@ -88,7 +106,7 @@ def update_my_profile(
 
 # --- Public route — anyone can visit this, no login needed ---
 
-@router.get("/{username}", response_model=ProfileResponse)
+@router.get("/{username}", response_model=PublicProfileResponse)
 def get_public_profile(username: str, db: Session = Depends(get_db)):
     # WHY no Depends(get_current_user) here?
     # This is the PUBLIC page — anyone with the link can view it
@@ -101,10 +119,33 @@ def get_public_profile(username: str, db: Session = Depends(get_db)):
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    return ProfileResponse(
+    # Only return active links, sorted by order
+    # WHY filter is_active? User can hide a link without deleting it
+    links = (
+        db.query(Link)
+        .filter(Link.user_id == user.id, Link.is_active.is_(True))
+        .order_by(Link.order)
+        .all()
+    )
+
+    return PublicProfileResponse(
         username=user.username,
         display_name=profile.display_name,
         bio=profile.bio,
         avatar_url=profile.avatar_url,
         theme=profile.theme or "default",
+        links=links,
     )
+
+@router.get("/debug/{username}")
+def debug_profile(username: str, db: Session = Depends(get_db)):
+    from models.link import Link
+    user = db.query(User).filter(User.username == username.lower()).first()
+    if not user:
+        return {"error": "user not found"}
+    links = db.query(Link).filter(Link.user_id == user.id).all()
+    return {
+        "user_id": str(user.id),
+        "link_count": len(links),
+        "links": [{"title": l.title, "is_active": l.is_active} for l in links]
+    }    

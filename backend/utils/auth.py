@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from config import settings
 from db.session import get_db
@@ -12,8 +12,10 @@ from models.user import User
 # WHY bcrypt? It's intentionally slow, making brute-force attacks expensive
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# This tells FastAPI: "look for a Bearer token at /auth/login"
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# WHY HTTPBearer instead of OAuth2PasswordBearer?
+# OAuth2PasswordBearer shows that confusing form in Swagger
+# HTTPBearer shows a simple popup — just paste your token, done!
+security = HTTPBearer()
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -29,14 +31,18 @@ def create_access_token(data: dict) -> str:
     # WHY sign? So nobody can tamper with the token — any change breaks the signature
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        # credentials.credentials is just the token string — no "Bearer " prefix
+        payload = jwt.decode(credentials.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
             raise credentials_exception
