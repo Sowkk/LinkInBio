@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from db.session import engine, Base
-from routers import auth, profile, links
+from routers import auth, profile, links, analytics
 
 # Create all DB tables on startup
 # WHY here? Convenient for now — Phase 5 we'll switch to Alembic migrations
@@ -21,6 +21,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(links.router)
+app.include_router(analytics.router)  # click + analytics before wildcard
 app.include_router(profile.router)  # wildcard /{username} always goes last!
 
 @app.get("/health")

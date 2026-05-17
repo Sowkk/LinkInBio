@@ -44,6 +44,13 @@ def add_link(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+
+    # Ensure URL always has a scheme
+    # WHY? Without https://, redirect treats it as relative path on our server
+    url = payload.url
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
     # Count existing links to set order for the new one
     # WHY? New link always goes to the bottom of the list
     existing_count = db.query(Link).filter(Link.user_id == current_user.id).count()
