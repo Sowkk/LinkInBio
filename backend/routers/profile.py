@@ -3,12 +3,19 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
 from uuid import UUID
+import json
 from db.session import get_db
+from db.redis import get_redis
 from models.user import User, Profile
 from models.link import Link
 from utils.auth import get_current_user
 
 router = APIRouter(tags=["profile"])
+
+# How long to cache a public profile (in seconds)
+# WHY 5 minutes? Balance between freshness and performance
+# If user updates their profile, old version shows for max 5 mins — acceptable
+CACHE_TTL = 300  # 5 minutes
 
 # --- Schemas ---
 
@@ -95,6 +102,12 @@ def update_my_profile(
     db.commit()
     db.refresh(profile)
 
+    # WHY invalidate cache here?
+    # User just updated their profile — old cached version is now stale
+    # Delete it so next visit fetches fresh data from PostgreSQL
+    r = get_redis()
+    r.delete(f"profile:{current_user.username}")
+
     return ProfileResponse(
         username=current_user.username,
         display_name=profile.display_name,
@@ -111,6 +124,17 @@ def get_public_profile(username: str, db: Session = Depends(get_db)):
     # WHY no Depends(get_current_user) here?
     # This is the PUBLIC page — anyone with the link can view it
     # No token required
+    r = get_redis()
+    cache_key = f"profile:{username.lower()}"
+
+    # Step 1 — Check Redis first
+    # WHY check cache before DB? Avoid DB hit if we already have the data
+    cached = r.get(cache_key)
+    if cached:
+        # Cache hit! Return immediately without touching PostgreSQL
+        return json.loads(cached)
+
+    # Step 2 — Cache miss — fetch from PostgreSQL
     user = db.query(User).filter(User.username == username.lower()).first()
     if not user:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -128,24 +152,30 @@ def get_public_profile(username: str, db: Session = Depends(get_db)):
         .all()
     )
 
-    return PublicProfileResponse(
+    result = PublicProfileResponse(
         username=user.username,
         display_name=profile.display_name,
         bio=profile.bio,
         avatar_url=profile.avatar_url,
         theme=profile.theme or "default",
-        links=links,
+        links=[
+            LinkPublic(
+                id=l.id,
+                title=l.title,
+                url=l.url,
+                order=l.order
+            ) for l in links
+        ],
     )
 
-@router.get("/debug/{username}")
-def debug_profile(username: str, db: Session = Depends(get_db)):
-    from models.link import Link
-    user = db.query(User).filter(User.username == username.lower()).first()
-    if not user:
-        return {"error": "user not found"}
-    links = db.query(Link).filter(Link.user_id == user.id).all()
-    return {
-        "user_id": str(user.id),
-        "link_count": len(links),
-        "links": [{"title": l.title, "is_active": l.is_active} for l in links]
-    }    
+    # Step 3 — Store in Redis for next time
+    # model_dump() converts Pydantic object to dict, json.dumps makes it a string
+    # WHY store as string? Redis only stores strings — we serialize to JSON
+    r.setex(
+        cache_key,          # key  → "profile:test4"
+        CACHE_TTL,          # TTL  → expires after 5 minutes automatically
+        json.dumps(result.model_dump(mode="json"))  # value → JSON string
+    )
+
+    return result
+ 

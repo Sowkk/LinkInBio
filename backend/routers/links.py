@@ -4,6 +4,7 @@ from pydantic import BaseModel, HttpUrl
 from typing import Optional, List
 from uuid import UUID
 from db.session import get_db
+from db.redis import get_redis
 from models.user import User
 from models.link import Link
 from utils.auth import get_current_user
@@ -35,6 +36,11 @@ class ReorderRequest(BaseModel):
     # e.g. ["id3", "id1", "id2"] means id3 should be first now
     link_ids: List[UUID]
 
+def invalidate_profile_cache(username: str):
+    # Helper to clear cache whenever profile content changes
+    # WHY separate function? We call this from add, update, delete, reorder
+    r = get_redis()
+    r.delete(f"profile:{username.lower()}")
 
 # --- Add a new link ---
 
@@ -64,6 +70,8 @@ def add_link(
     db.add(link)
     db.commit()
     db.refresh(link)
+
+    invalidate_profile_cache(current_user.username)
     return link
 
 
@@ -83,7 +91,23 @@ def get_my_links(
     return links
 
 
-# --- Update a single link ---
+@router.put("/reorder", response_model=List[LinkResponse])
+def reorder_links(
+    payload: ReorderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    links = db.query(Link).filter(Link.user_id == current_user.id).all()
+    link_map = {link.id: link for link in links}
+
+    for new_order, link_id in enumerate(payload.link_ids):
+        if link_id in link_map:
+            link_map[link_id].order = new_order
+
+    db.commit()
+    invalidate_profile_cache(current_user.username)
+    return sorted(links, key=lambda l: l.order)
+
 
 @router.put("/{link_id}", response_model=LinkResponse)
 def update_link(
@@ -109,6 +133,7 @@ def update_link(
 
     db.commit()
     db.refresh(link)
+    invalidate_profile_cache(current_user.username)
     return link
 
 
@@ -129,6 +154,8 @@ def delete_link(
 
     db.delete(link)
     db.commit()
+    invalidate_profile_cache(current_user.username)
+
     # WHY return nothing (204)?
     # 204 = "No Content" — standard HTTP response for successful delete
     # There's nothing to return since the resource no longer exists
@@ -153,5 +180,5 @@ def reorder_links(
             link_map[link_id].order = new_order
 
     db.commit()
-
+    invalidate_profile_cache(current_user.username)
     return sorted(links, key=lambda l: l.order)
