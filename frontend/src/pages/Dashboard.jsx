@@ -78,6 +78,31 @@ export default function Dashboard() {
     }
   }
 
+  async function moveLink(index, direction) {
+    // direction: -1 = move up, +1 = move down
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= links.length) return;
+
+    // Swap the two links in local array
+    // WHY update locally first? Feels instant to user — no waiting for API
+    // This is called Optimistic UI Update
+    const reordered = [...links];
+    [reordered[index], reordered[newIndex]] = [reordered[newIndex], reordered[index]];
+    setLinks(reordered);
+
+    // Then send new order to backend
+    // Backend expects array of IDs in new order
+    try {
+      await api.put("/links/reorder", {
+        link_ids: reordered.map((l) => l.id),
+      });
+    } catch {
+      // If API fails, revert local state back
+      setError("Failed to reorder");
+      setLinks(links);
+    }
+  }
+
   function copyPublicUrl() {
     if (!profile) return;
     navigator.clipboard.writeText(`http://localhost:5173/${profile.username}`);
@@ -133,7 +158,7 @@ export default function Dashboard() {
       <div style={styles.card}>
         <h2 style={styles.cardTitle}>Your links ({links.length})</h2>
         {links.length === 0 && <p style={styles.empty}>No links yet — add one above!</p>}
-        {links.map((link) => (
+        {links.map((link, index) => (
           <div key={link.id} style={styles.linkRow}>
             {editingId === link.id ? (
               // Edit mode — show input fields inline
@@ -156,6 +181,20 @@ export default function Dashboard() {
             ) : (
               // Normal view mode
               <>
+                {/* Reorder arrows */}
+                <div style={styles.arrows}>
+                  <button
+                    style={{ ...styles.arrowBtn, opacity: index === 0 ? 0.2 : 1 }}
+                    onClick={() => moveLink(index, -1)}
+                    disabled={index === 0}
+                  >▲</button>
+                  <button
+                    style={{ ...styles.arrowBtn, opacity: index === links.length - 1 ? 0.2 : 1 }}
+                    onClick={() => moveLink(index, 1)}
+                    disabled={index === links.length - 1}
+                  >▼</button>
+                </div> 
+
                 <div style={styles.linkInfo}>
                   <span style={{ ...styles.linkTitle, opacity: link.is_active ? 1 : 0.4 }}>
                     {link.title}
@@ -207,8 +246,10 @@ const styles = {
   addBtn:      { padding: "0.75rem 1.5rem", borderRadius: "8px", border: "none", background: "#6366f1", color: "#fff", fontWeight: 600, cursor: "pointer" },
   copyBtn:     { padding: "0.6rem 1rem", borderRadius: "8px", border: "1px solid #6366f1", background: "transparent", color: "#6366f1", cursor: "pointer", fontSize: "0.85rem" },
   logoutBtn:   { padding: "0.6rem 1rem", borderRadius: "8px", border: "1px solid #333", background: "transparent", color: "#888", cursor: "pointer", fontSize: "0.85rem" },
-  linkRow:     { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.85rem 0", borderBottom: "1px solid #2a2a2a" },
-  linkInfo:    { display: "flex", flexDirection: "column", gap: "0.2rem" },
+  linkRow:     { display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.85rem 0", borderBottom: "1px solid #2a2a2a" },
+  arrows:      { display: "flex", flexDirection: "column", gap: "2px" },
+  arrowBtn:    { background: "none", border: "none", color: "#666", cursor: "pointer", fontSize: "0.7rem", padding: "2px 4px", lineHeight: 1 },
+  linkInfo:    { flex: 1, display: "flex", flexDirection: "column", gap: "0.2rem" },
   linkTitle:   { color: "#fff", fontWeight: 500, fontSize: "0.95rem" },
   linkUrl:     { color: "#888", fontSize: "0.8rem" },
   linkActions: { display: "flex", gap: "0.5rem", alignItems: "center" },
