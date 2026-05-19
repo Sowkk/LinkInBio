@@ -64,7 +64,7 @@ def add_link(
     link = Link(
         user_id=current_user.id,
         title=payload.title,
-        url=payload.url,
+        url=url,
         order=existing_count   # 0-indexed, so 3rd link gets order=2
     )
     db.add(link)
@@ -151,6 +151,13 @@ def delete_link(
         raise HTTPException(status_code=404, detail="Link not found")
     if link.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your link")
+    
+    # Delete click events first before deleting the link
+    # WHY? Foreign key constraint — click_events.link_id references links.id
+    # PostgreSQL won't delete a link that still has click history pointing to it
+    # We delete child records first, then the parent — this is called "manual cascade"
+    from models.click import ClickEvent
+    db.query(ClickEvent).filter(ClickEvent.link_id == link_id).delete()
 
     db.delete(link)
     db.commit()
