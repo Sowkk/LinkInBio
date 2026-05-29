@@ -105,7 +105,7 @@ export default function Dashboard() {
 
   function copyPublicUrl() {
     if (!profile) return;
-    navigator.clipboard.writeText(`http://localhost:5173/${profile.username}`);
+    navigator.clipboard.writeText(`${window.location.origin}/${profile.username}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }

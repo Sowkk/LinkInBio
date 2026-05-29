@@ -9,6 +9,8 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
 });
 
+// Interceptor — automatically attaches JWT token to every request
+// WHY? Without this we'd manually add Authorization header in every single API call
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
   if (token) {

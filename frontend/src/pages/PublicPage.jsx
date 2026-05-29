@@ -21,7 +21,7 @@ export default function PublicPage() {
 
   function handleLinkClick(linkId) {
     // Navigate to our click tracking route — redirects to actual URL
-    window.open(`http://localhost:8000/click/${linkId}`, "_blank");
+    window.open(`http://${window.location.protocol}//${window.location.hostname}:8000/click/${linkId}`, "_blank");
 }
 
   if (notFound) return (

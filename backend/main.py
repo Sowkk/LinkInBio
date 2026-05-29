@@ -13,7 +13,11 @@ app = FastAPI(title="Link in Bio API", version="0.2.0")
 # WHY needed? Browsers block cross-origin requests by default — this whitelists our frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Vite's default port
+    allow_origins=[
+        "http://localhost:5173",  # local dev
+        "http://localhost",       # Docker (port 80)
+        "http://localhost:80",    # Docker explicit port
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

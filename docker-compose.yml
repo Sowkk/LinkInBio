@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+
+  # PostgreSQL database
+  db:
+    image: postgres:16-alpine   # WHY alpine? Lighter image, faster download
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: linkinbio
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # WHY volume? Container data is deleted when container stops
+      # Volume persists data on host machine — your DB survives restarts
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # FastAPI backend
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:password@db:5432/linkinbio
+      # WHY "db" instead of "localhost"?
+      # In Docker, each service has its own hostname = service name
+      # "db" is the PostgreSQL container's hostname inside Docker network
+      SECRET_KEY: your-super-secret-key-change-in-production
+      REDIS_HOST: redis   # same reason — Redis container's hostname
+      REDIS_PORT: 6379
+    depends_on:
+      db:
+        condition: service_healthy   # wait for DB to be ready before starting
+      redis:
+        condition: service_healthy
+    # WHY depends_on with condition?
+    # Without it, backend might start before DB is ready and crash on first query
+
+  # React frontend
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8000  # backend URL the browser will call
+    ports:
+      - "80:80"   # serve frontend on port 80 (standard HTTP port)
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:   # named volume — Docker manages this on your host machine
